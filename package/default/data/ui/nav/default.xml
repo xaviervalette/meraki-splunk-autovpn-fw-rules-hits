@@ -1,0 +1,6 @@
+<nav>
+  <view name="meraki_vpnfw_rule_hits" default="true"/>
+  <view name="inputs"/>
+  <view name="configuration"/>
+  <view name="search"/>
+</nav>

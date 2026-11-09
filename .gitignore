@@ -1,0 +1,8 @@
+# Build outputs (ucc-gen build / package)
+output/
+dist/
+
+.DS_Store
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,161 @@
+<form version="1.1" theme="light" script="meraki_vpnfw_rule_hits.js" stylesheet="meraki_vpnfw_rule_hits.css">
+  <label>Meraki VPN Firewall Rule Hits</label>
+  <description>Organization site-to-site VPN firewall rules (Dashboard API) with hit counts (MX syslog, vpn_firewall).</description>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="tr">
+      <label>Time range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="org">
+      <label>Organization</label>
+      <fieldForLabel>label</fieldForLabel>
+      <fieldForValue>org_id</fieldForValue>
+      <search>
+        <query>| inputlookup meraki_vpnfw_rules | stats count by org_id org_name | eval label=org_name." (".org_id.")"</query>
+      </search>
+      <selectFirstChoice>true</selectFirstChoice>
+    </input>
+    <input type="radio" token="hits_src">
+      <label>Hit source</label>
+      <choice value="meraki_vpnfw_hits_raw">Raw syslog (exact)</choice>
+      <choice value="meraki_vpnfw_hits_summary">Hourly summary (fast)</choice>
+      <default>meraki_vpnfw_hits_raw</default>
+    </input>
+  </fieldset>
+
+  <search id="hits_base">
+    <query>`$hits_src$`</query>
+    <earliest>$tr.earliest$</earliest>
+    <latest>$tr.latest$</latest>
+  </search>
+
+  <search id="rules_table">
+    <query>| inputlookup meraki_vpnfw_rules where org_id="$org$"
+| eval row="rule", shadowed_by=coalesce(shadowed_by, "")
+| append [ search `$hits_src$` | search org_id="$org$" | stats sum(hits) AS hits max(last_hit) AS last_hit by signature | eval row="hits" ]
+| eventstats sum(hits) AS sig_hits max(last_hit) AS sig_last by signature
+| where row=="rule"
+| eval rule_hits=if(shadowed_by=="", coalesce(sig_hits, 0), 0)
+| eval note=case(shadowed_by!="", "Never matched: shadowed by rule #".shadowed_by,
+                 syslogEnabled!="true" AND rule_hits==0, "Syslog off: hits not counted",
+                 rule_hits==0, "No hits in range",
+                 true(), "")
+| eval rule_hits=if(syslogEnabled!="true" AND rule_hits==0, null(), rule_hits)
+| eventstats sum(rule_hits) AS total
+| eval "% of hits"=if(total>0 AND isnotnull(rule_hits), round(100*rule_hits/total, 2), null())
+| eval "#"=if(is_default=="true", "default", rule_index), "Last hit"=if(isnotnull(sig_last) AND shadowed_by=="", strftime(sig_last, "%F %T"), "")
+| eval Syslog=if(syslogEnabled=="true", "on", "off")
+| sort 0 rule_index
+| rename policy AS Policy comment AS "Rule description" protocol AS Protocol srcCidr AS Source srcPort AS "Src port" destCidr AS Destination destPort AS "Dst port" rule_hits AS Hits note AS Note
+| table "#" Policy "Rule description" Protocol Source "Src port" Destination "Dst port" Syslog Hits "% of hits" "Last hit" Note signature</query>
+    <earliest>$tr.earliest$</earliest>
+    <latest>$tr.latest$</latest>
+  </search>
+
+  <row>
+    <panel>
+      <single>
+        <title>Logged hits</title>
+        <search base="rules_table">
+          <query>stats sum(Hits) AS hits</query>
+        </search>
+        <option name="numberPrecision">0</option>
+      </single>
+    </panel>
+    <panel>
+      <single>
+        <title>Rules with zero hits (syslog on)</title>
+        <search base="rules_table">
+          <query>where Syslog=="on" AND Hits==0 | stats count</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x53a051","0xf8be34"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+    <panel>
+      <single>
+        <title>Unmatched hits (see table below)</title>
+        <search base="hits_base">
+          <query>search org_id="$org$" OR org_id="unknown"
+| lookup meraki_vpnfw_rules org_id signature OUTPUT rule_index
+| where isnull(rule_index) | stats sum(hits) AS hits | fillnull value=0 hits</query>
+        </search>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Rules and hits (yellow = zero hits; click a rule to open its logs)</title>
+      <table id="rules_table_viz">
+        <search base="rules_table"></search>
+        <fields>["#","Policy","Rule description","Protocol","Source","Src port","Destination","Dst port","Syslog","Hits","% of hits","Last hit","Note"]</fields>
+        <option name="count">100</option>
+        <option name="drilldown">row</option>
+        <format type="color" field="Policy">
+          <colorPalette type="map">{"allow":#53A051,"deny":#DC4E41}</colorPalette>
+        </format>
+        <format type="number" field="Hits">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="Hits">
+          <colorPalette type="expression">if(value == 0, "#F8BE34", "#FFFFFF")</colorPalette>
+        </format>
+        <drilldown>
+          <set token="sel_rule">$row.Rule description$</set>
+          <set token="sel_sig">$row.signature$</set>
+          <link target="_blank">search?q=search%20%60meraki_vpnfw_syslog%60%20vpn_firewall%20%22pattern%3A%22%20%7C%20%60meraki_vpnfw_parse%60%20%7C%20where%20fw_category%3D%3D%22vpn_firewall%22%20AND%20signature%3D%3D%22$row.signature|u$%22%20%7C%20lookup%20meraki_vpnfw_appliances%20mac%20AS%20mx_mac%20OUTPUT%20org_id%20mx_name%20%7C%20where%20org_id%3D%3D%22$org|u$%22&amp;earliest=$tr.earliest|u$&amp;latest=$tr.latest|u$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row depends="$sel_rule$">
+    <panel>
+      <title>Hits per MX for rule “$sel_rule$” (click a row to close)</title>
+      <table>
+        <search>
+          <query>`$hits_src$`
+| search org_id="$org$"
+| where signature==$sel_sig|s$
+| stats sum(hits) AS Hits max(last_hit) AS last by mx_name mx_mac
+| eval "Last hit"=strftime(last, "%F %T")
+| rename mx_name AS MX mx_mac AS MAC
+| table MX MAC Hits "Last hit" | sort - Hits</query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <drilldown>
+          <unset token="sel_rule"></unset>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Unmatched syslog patterns (rule changed, MX not in a polled org, or unsupported rule syntax)</title>
+      <table>
+        <search base="hits_base">
+          <query>search org_id="$org$" OR org_id="unknown"
+| lookup meraki_vpnfw_rules org_id signature OUTPUT rule_index
+| where isnull(rule_index)
+| stats sum(hits) AS Hits max(last_hit) AS last by org_id mx_name fw_pattern
+| eval "Last hit"=strftime(last, "%F %T")
+| rename org_id AS Org mx_name AS MX fw_pattern AS "Syslog pattern"
+| table Org MX "Syslog pattern" Hits "Last hit" | sort - Hits</query>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,6 @@
+#rules_table_viz tr.meraki-zero-hits td {
+    background-color: #fdf0c2 !important;
+}
+#rules_table_viz tr.meraki-zero-hits:hover td {
+    background-color: #f8be34 !important;
+}
