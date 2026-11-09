@@ -5,6 +5,10 @@ Shows every **organization site-to-site VPN firewall rule** next to its **hit co
 - **Rules** come from the Dashboard API: `GET /organizations/{orgId}/appliance/vpn/vpnFirewallRules`.
 - **Hits** come from MX syslog lines in the `vpn_firewall` category, which Splunk already collects.
 
+![Meraki VPN Firewall Rule Hits dashboard](docs/dashboard.png)
+
+Rules with zero hits are highlighted in yellow. Clicking a rule opens its raw syslog lines in Search.
+
 ## How a hit is matched to a rule
 
 The MX syslog line carries no rule number or comment. It carries the rule's **compiled match expression**:
