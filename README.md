@@ -29,12 +29,26 @@ The org is found from the MX's MAC address. The syslog hostname (`mx67-00005e005
 
 ## Data flow
 
-```
-Meraki API --(input, every 5 min)--> meraki:vpnfw:rule / meraki:vpnfw:appliance events
-   --(saved searches, every 5 min)--> lookups meraki_vpnfw_rules.csv / meraki_vpnfw_appliances.csv
-MX syslog (cisco:meraki, vpn_firewall) --`meraki_vpnfw_parse`--> signature
-   --(hourly "Meraki VPN FW - Hits summary")--> summary index
-Dashboard "Meraki VPN Firewall Rule Hits" = rules lookup + hits (raw syslog or summary)
+```mermaid
+flowchart LR
+    subgraph rules["Rule definitions"]
+        api["Meraki API<br/>polled every 5 min"] --> events["API events<br/>meraki:vpnfw:rule<br/>meraki:vpnfw:appliance"]
+        events -->|"saved searches, every 5 min"| lookups["Lookups<br/>meraki_vpnfw_rules.csv<br/>meraki_vpnfw_appliances.csv"]
+    end
+    subgraph hits["Hit counts"]
+        syslog["MX syslog<br/>cisco:meraki, vpn_firewall"] -->|"meraki_vpnfw_parse"| sig["Signature"]
+        sig -->|"hourly: Meraki VPN FW - Hits summary"| summary["Summary index"]
+    end
+    lookups --> dash["Dashboard<br/>Meraki VPN Firewall Rule Hits"]
+    sig -->|"raw mode"| dash
+    summary -->|"summary mode"| dash
+
+    classDef rule fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    classDef hit fill:#FAECE7,stroke:#993C1D,color:#712B13
+    classDef out fill:#F1EFE8,stroke:#5F5E5A,color:#444441
+    class api,events,lookups rule
+    class syslog,sig,summary hit
+    class dash out
 ```
 
 ## Install
