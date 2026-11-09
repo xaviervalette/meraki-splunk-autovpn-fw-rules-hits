@@ -53,6 +53,22 @@ The org is found from the MX's MAC address. The syslog hostname (`mx67-00005e005
 - **Hit source:** "Raw syslog" counts exactly but is slower over long ranges. "Hourly summary" is fast but can be up to 1 hour behind. To fill the summary for past hours:
   `splunk cmd python fill_summary_index.py -app TA-meraki-vpnfw -name "Meraki VPN FW - Hits summary" -et -30d@h -lt @h -j 4 -dedup true`
 
+## Limit: long rules are truncated by the MX
+
+The MX cuts a syslog message to a fixed size **before it sends it**. A rule with many addresses produces a long `pattern:` text, which is cut mid-address. Its signature then matches no rule, and its hits show up in the **Unmatched patterns** panel instead of the rule.
+
+| MX syslog transport | Observed cut |
+|---|---|
+| TCP, RFC 5424 | ~1400 bytes (lab test: 1413-byte frame, pattern cut at `dst 198.5`) |
+| UDP, RFC 3164 (BSD) | ~1024 bytes (seen at a customer site, not reproduced in lab) |
+
+- In the lab test, Splunk received every byte the MX announced in its TCP length prefix. The data is lost on the MX, so no Splunk setting (`TRUNCATE`, input type) can recover it.
+- As a rough guide, each `/32` adds about 24 bytes to the pattern. A rule with more than ~35 addresses (UDP) or ~50 addresses (TCP) is at risk.
+- What you can do:
+  - Use TCP / RFC 5424 syslog if your MX firmware offers it. It raises the limit but does not remove it.
+  - Split large rules, or replace lists of `/32` with wider CIDRs.
+  - Check for cut lines: `` `meraki_vpnfw_syslog` vpn_firewall | eval len=len(_raw) | where len>1000 | stats count by host ``
+
 ## Limits (unverified syntax)
 
 These rule forms were not seen in real syslog lines. If one doesn't match, it shows up in the Unmatched panel:
